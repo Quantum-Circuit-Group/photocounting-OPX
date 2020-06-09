@@ -68,7 +68,6 @@ parameters = {
 }
 
 optimized_parameters = {
-
     'offset_memory': 0.017,
     'offset_buffer_I': -0.0037,
     'offset_buffer_Q': -0.0016,
@@ -80,6 +79,7 @@ optimized_parameters = {
     'drag_amp': 0.05,
 
     'qubit_if': 200e6,
+    'qubit_long_if':200e6,
 
     'wait_mod2': 140,
     'wait_mod4': 64,
@@ -122,8 +122,13 @@ optimized_parameters = {
     'clear_ro_length_down_steady': 52,
 
     'ro_if': 51e6,
-
     'weights_path': 'weights.npy',
+
+    'square_swap_amp': 0.01,
+    'square_swap_length': 200,
+    'buffer_arbitrary_amp': 0.1,
+    'selective_pi_length': 560,
+    'selective_pi_amp': 0.0119,
 }
 
 
@@ -148,6 +153,7 @@ def get_config(params):
     theta = float(params['theta'])
 
     qubit_if = float(params['qubit_if'])
+    qubit_long_if = float(params['qubit_long_if'])
     buffer_if = float(params['buffer_if'])
     pump_if = float(params['pump_if'])
     memory_if = float(params['memory_if'])
@@ -171,10 +177,13 @@ def get_config(params):
     unconditional_pi_amp = float(params['unconditional_pi_amp'])
     unconditional_pi_2_length = int(params['unconditional_pi_2_length'])
     unconditional_pi_2_amp = float(params['unconditional_pi_2_amp'])
+    selective_pi_length = int(params['selective_pi_length'])
+    selective_pi_amp = float(params['selective_pi_amp'])
 
     meas_length = int(params['meas_length'])
 
     buffer_I = float(params['buffer_I'])
+    buffer_arbitrary_amp = float(params['buffer_arbitrary_amp'])
 
     wait_mod2 = int(params['wait_mod2'])
     wait_mod4 = int(params['wait_mod4'])
@@ -189,6 +198,8 @@ def get_config(params):
     weights1 = (np.cos(correction_angle) * weights).tolist()
     weights2 = (np.sin(correction_angle) * weights).tolist()
 
+    square_swap_amp = float(params['square_swap_amp'])
+    square_swap_length = int(params['square_swap_length'])
     sech_catch_amp = float(params['sech_catch_amp'])
     sech_catch_length = int(params['sech_catch_length'])
     sech_swap_amp = float(params['sech_swap_amp'])
@@ -203,6 +214,8 @@ def get_config(params):
     lambd = float(params['lambd'])
     kappa = float(params['kappa'])
     ki = float(params['ki'])
+
+    random_shape = np.load('arbitrary.npy')
 
     config1 = {
         'version': 1,
@@ -252,6 +265,25 @@ def get_config(params):
                     'mod_4_y': 'mod_4_y_pulse',
                 }
             },
+            'qubit_long': {
+                'mixInputs': {
+                    'I': ('con1', 1),
+                    'Q': ('con1', 2),
+                    'mixer': 'mixer_qubit_long',
+                    'lo_frequency': 4.4792e9
+                },
+                'digitalInputs': {
+                    'port': {
+                        'port': ('con1', 2),
+                        'buffer': 0,
+                        'delay': 130
+                    }
+                },
+                'intermediate_frequency': qubit_long_if,
+                'operations': {
+                    'selective_pi': 'selective_pi_pulse',
+                }
+            },
             'readout': {
                 'singleInput': {
                     'port': ('con1', 3)
@@ -292,6 +324,7 @@ def get_config(params):
                 'operations': {
                     'sech_catch': 'sech_catch_pulse',
                     'sech_swap': 'sech_swap_pulse',
+                    'square_swap': 'square_swap_pulse',
                 }
             },
             'buffer': {
@@ -311,6 +344,7 @@ def get_config(params):
                 'intermediate_frequency': buffer_if,
                 'operations': {
                     'sech_kick': 'buffer_sech_pulse',
+                    'arbitrary':'arbitrary_pulse'
                 },
                 'outputs': {
                     'out1': ('con1', 1)
@@ -404,6 +438,33 @@ def get_config(params):
                     'Q': 'buffer_sech_Q_wf'
                 },
                 'digital_marker': 'trigger'
+            },
+            'selective_pi_pulse': {
+                'operation': 'control',
+                'length': padded_time(selective_pi_length),
+                'waveforms': {
+                    'I': 'selective_pi_wf',
+                    'Q': 'zero_wf'
+                },
+                'digital_marker': 'trigger'
+            },
+            'square_swap_pulse': {
+                'operation': 'control',
+                'length': padded_time(square_swap_length),
+                'waveforms': {
+                    'I': 'square_swap_wf',
+                    'Q': 'zero_wf'
+                },
+                'digital_marker': 'trigger'
+            },
+            'arbitrary_pulse': {
+                'operation': 'control',
+                'length': padded_time(len(random_shape)),
+                'waveforms': {
+                    'I': 'arbitrary_wf',
+                    'Q': 'zero_wf'
+                },
+                'digital_marker': 'ON'
             },
         },
         'waveforms': {
@@ -503,7 +564,18 @@ def get_config(params):
                 'samples': list((1 - buffer_I) * np.array([0.0] * delay_catch + sech_shape(buffer_sech_amp, buffer_sech_length, 4) \
                                                           + [0.0] * padding_catch))
             },
-
+            'square_swap_wf': {
+                'type': 'constant',
+                'sample': square_swap_amp
+            },
+            'arbitrary_wf': {
+                'type': 'arbitrary',
+                'samples': list(np.array(random_shape)*buffer_arbitrary_amp) + [0.0]*(padded_time(len(random_shape))-len(random_shape))
+            },
+            'selective_pi_wf': {
+                'type': 'arbitrary',
+                'samples': sech_shape(selective_pi_amp, selective_pi_length, 4)
+            },
         },
         'digital_waveforms': {
             'trigger': {
@@ -539,6 +611,11 @@ def get_config(params):
                 'intermediate_frequency': buffer_if,
                 'correction': IQ_imbalance(-0.001, -np.pi * 0.054),
                 'lo_frequency': 10.222e9 + 50e6,
+            }],
+            'mixer_qubit_long': [{
+                'intermediate_frequency': qubit_long_if,
+                'correction': IQ_imbalance(0.088, -np.pi * 0.04),
+                'lo_frequency': 4.4792e9,
             }],
         }
     }
